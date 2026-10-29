@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="referrer" content="no-referrer">
+  <title>Loa Thông Báo Thanh Toán - Giọng Chị Google</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    .the-loa {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 32px;
+      width: 440px;
+      text-align: center;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+
+    .nhan-trang-thai {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      margin-bottom: 20px;
+      background: #374151;
+      color: #9ca3af;
+      font-weight: 500;
+    }
+
+    .trang-thai-online {
+      background: #064e3b;
+      color: #34d399;
+    }
+
+    .trang-thai-offline {
+      background: #450a0a;
+      color: #f87171;
+    }
+
+    .tieu-de {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+
+    .so-tien {
+      font-size: 2.6rem;
+      font-weight: 800;
+      color: #38bdf8;
+      margin: 16px 0;
+    }
+
+    .hoa-don {
+      color: #94a3b8;
+      font-size: 0.95rem;
+      margin-bottom: 24px;
+    }
+
+    .nhom-nut {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+
+    .nut-kich-hoat {
+      background: #2563eb;
+      color: #ffffff;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    .nut-kich-hoat:hover {
+      background: #1d4ed8;
+    }
+
+    .nut-kich-hoat:active {
+      transform: scale(0.98);
+    }
+
+    .nut-test {
+      background: #059669;
+      display: none;
+    }
+
+    .nut-test:hover {
+      background: #047857;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="the-loa">
+    <div id="nhanTrangThai" class="nhan-trang-thai">Đang kết nối máy chủ (Port 1884)...</div>
+    <div class="tieu-de">LOA THANH TOÁN CHỊ GOOGLE</div>
+
+    <div id="hienThiSoTien" class="so-tien">0 đ</div>
+    <div id="hienThiHoaDon" class="hoa-don">Chưa có giao dịch phát sinh</div>
+
+    <div class="nhom-nut">
+      <button id="nutBatLoa" class="nut-kich-hoat" onclick="kichHoatLoa()">BẬT ÂM THANH LOA</button>
+      <button id="nutTestLoa" class="nut-kich-hoat nut-test" onclick="testDocThu()">TEST ĐỌC 20.000Đ</button>
+    </div>
+  </div>
+
+  <script>
+    let daKichHoatLoa = false;
+    let audioCtx = null;
+    let currentAudio = null;
+
+    // 1. Tạo tiếng chuông Ting Ting trước khi đọc
+    function phatTiengTingTing() {
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+
+        const now = audioCtx.currentTime;
+
+        const osc1 = audioCtx.createOscillator();
+        const gain1 = audioCtx.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(1046.50, now); // C6
+        gain1.gain.setValueAtTime(0.3, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc1.connect(gain1);
+        gain1.connect(audioCtx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.35);
+
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(1318.51, now + 0.15); // E6
+        gain2.gain.setValueAtTime(0.4, now + 0.15);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+        osc2.connect(gain2);
+        gain2.connect(audioCtx.destination);
+        osc2.start(now + 0.15);
+        osc2.stop(now + 0.6);
+      } catch (e) {
+        console.warn("Lỗi tạo tiếng chuông:", e);
+      }
+    }
+
+    // 2. Chuyển đổi số tiền sang chữ tiếng Việt chuẩn ngữ pháp
+    function docSoThanhChu(so) {
+      if (so === 0) return "không";
+      const chuSo = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"];
+
+      function doc3So(n, dayDu) {
+        let tram = Math.floor(n / 100);
+        let chuc = Math.floor((n % 100) / 10);
+        let donVi = n % 10;
+        let kq = "";
+
+        if (tram > 0 || dayDu) {
+          kq += chuSo[tram] + " trăm ";
+        }
+
+        if (chuc > 1) {
+          kq += chuSo[chuc] + " mươi ";
+          if (donVi === 1) kq += "mốt ";
+          else if (donVi === 5) kq += "lăm ";
+          else if (donVi > 0) kq += chuSo[donVi] + " ";
+        } else if (chuc === 1) {
+          kq += "mười ";
+          if (donVi === 5) kq += "lăm ";
+          else if (donVi > 0) kq += chuSo[donVi] + " ";
+        } else if (tram > 0 && donVi > 0) {
+          kq += "lẻ " + chuSo[donVi] + " ";
+        } else if (donVi > 0) {
+          kq += chuSo[donVi] + " ";
+        }
+        return kq.trim();
+      }
+
+      const donViLon = ["", "nghìn", "triệu", "tỷ"];
+      let chuoiKq = "";
+      let i = 0;
+
+      while (so > 0) {
+        let n = so % 1000;
+        if (n > 0) {
+          let str = doc3So(n, i > 0 && so >= 1000);
+          chuoiKq = str + " " + donViLon[i] + " " + chuoiKq;
+        }
+        so = Math.floor(so / 1000);
+        i++;
+      }
+      return chuoiKq.trim();
+    }
+
+    // 3. Phát âm thanh chuẩn 100% giọng Chị Google Tiếng Việt (Không dùng SpeechSynthesis của máy)
+    function docTiengChiGoogle(vanBan, delayMs = 0) {
+      if (!daKichHoatLoa) return;
+
+      setTimeout(() => {
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio = null;
+        }
+
+        // URL chuẩn của Chị Google Tiếng Việt (tl=vi)
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(vanBan)}&tl=vi&total=1&idx=0&textlen=${vanBan.length}&client=tw-ob`;
+
+        const audio = new Audio();
+        // QUAN TRỌNG: Ẩn Referrer để Google không chặn lỗi 403 Forbidden
+        audio.referrerPolicy = "no-referrer";
+        audio.src = url;
+        currentAudio = audio;
+
+        audio.play().catch(err => {
+          console.warn("Đang chuyển sang luồng Google TTS dự phòng...", err);
+          // Dự phòng 2: Gọi qua endpoint gtx cũng với no-referrer
+          const backupAudio = new Audio();
+          backupAudio.referrerPolicy = "no-referrer";
+          backupAudio.src = `https://translate.googleapis.com/translate_tts?client=gtx&ie=UTF-8&tl=vi&dt=t&q=${encodeURIComponent(vanBan)}`;
+          currentAudio = backupAudio;
+          backupAudio.play().catch(e => console.error("Không thể phát audio:", e));
+        });
+      }, delayMs);
+    }
+
+    function kichHoatLoa() {
+      daKichHoatLoa = true;
+      document.getElementById('nutBatLoa').style.display = 'none';
+      document.getElementById('nutTestLoa').style.display = 'inline-block';
+
+      phatTiengTingTing();
+      docTiengChiGoogle("Hệ thống loa thông báo đã sẵn sàng", 600);
+    }
+
+    function testDocThu() {
+      phatTiengTingTing();
+      docTiengChiGoogle("Thanh toán thành công hai mươi nghìn đồng", 600);
+    }
+
+    // 4. Kết nối tới Mosquitto qua cổng WebSocket 1884
+    const diaChiBrokerWs = 'ws://61.14.233.172:1884';
+    const client = mqtt.connect(diaChiBrokerWs, {
+      reconnectPeriod: 3000,
+    });
+
+    const phanTuTrangThai = document.getElementById('nhanTrangThai');
+    const phanTuSoTien = document.getElementById('hienThiSoTien');
+    const phanTuHoaDon = document.getElementById('hienThiHoaDon');
+
+    client.on('connect', () => {
+      phanTuTrangThai.className = 'nhan-trang-thai trang-thai-online';
+      phanTuTrangThai.innerText = '● Đã kết nối Broker (Port 1884)';
+      client.subscribe('shop/speaker/payment');
+    });
+
+    client.on('error', (loi) => {
+      phanTuTrangThai.className = 'nhan-trang-thai trang-thai-offline';
+      phanTuTrangThai.innerText = '○ Lỗi kết nối máy chủ (Port 1884)';
+    });
+
+    client.on('close', () => {
+      phanTuTrangThai.className = 'nhan-trang-thai trang-thai-offline';
+      phanTuTrangThai.innerText = '○ Mất kết nối Broker (Port 1884)';
+    });
+
+    client.on('message', (chuDe, tinNhan) => {
+      try {
+        const duLieu = JSON.parse(tinNhan.toString());
+
+        if (duLieu.event === 'PAYMENT_RECEIVED' && duLieu.amount > 0) {
+          const soTien = Number(duLieu.amount);
+          const maHoaDon = duLieu.invoiceNumber || 'Thành công';
+
+          // Cập nhật giao diện
+          phanTuSoTien.innerText = '+' + soTien.toLocaleString('vi-VN') + ' đ';
+          phanTuHoaDon.innerText = 'Mã hóa đơn: ' + maHoaDon;
+
+          // Chuyển số thành chữ tiếng Việt
+          const soTienBangChu = docSoThanhChu(soTien);
+          const cauDoc = `Thanh toán thành công ${soTienBangChu} đồng`;
+
+          // Kêu Ting Ting và phát giọng chị Google
+          phatTiengTingTing();
+          docTiengChiGoogle(cauDoc, 650);
+        }
+      } catch (loi) {
+        console.error('Lỗi giải mã JSON:', loi);
+      }
+    });
+  </script>
+</body>
+
+</html>
